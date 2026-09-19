@@ -187,9 +187,9 @@ Item {
       ctx.stroke()
     }
 
-    strokeHex(maxR * 1.08, 0.16, 1)
-    strokeHex(maxR * 0.82, 0.28 + pulse * 0.2, 2)
-    strokeHex(maxR * 0.58, 0.12, 1)
+    strokeHex(maxR * 1.16, 0.22, 1.6)
+    strokeHex(maxR * 0.9, 0.48 + pulse * 0.22, 3)
+    strokeHex(maxR * 0.64, 0.2, 1.4)
 
     var arcs = [
       { id: "GO", color: root.goColor, start: -Math.PI * 0.5 },
@@ -200,9 +200,9 @@ Item {
       var arc = arcs[i]
       var on = arc.id === root.selectedAction
       ctx.beginPath()
-      ctx.lineWidth = on ? 7 + pulse * 6 : 3
-      ctx.strokeStyle = cssColor(arc.color, on ? 0.88 : 0.28)
-      ctx.arc(cx, cy, maxR * 0.94, arc.start + 0.08, arc.start + Math.PI * 0.666 - 0.08)
+      ctx.lineWidth = on ? 10 + pulse * 7 : 5
+      ctx.strokeStyle = cssColor(arc.color, on ? 0.95 : 0.5)
+      ctx.arc(cx, cy, maxR * 0.98, arc.start + 0.07, arc.start + Math.PI * 0.666 - 0.07)
       ctx.stroke()
     }
 
@@ -260,6 +260,13 @@ Item {
     interval: 220
     repeat: false
     onTriggered: root.dismiss()
+  }
+
+  Timer {
+    id: closeFallback
+    interval: 900
+    repeat: false
+    onTriggered: if (root.confirming) root.dismiss()
   }
 
   Timer {
@@ -488,8 +495,8 @@ Item {
       id: pillarRow
       anchors.horizontalCenter: parent.horizontalCenter
       anchors.bottom: parent.bottom
-      anchors.bottomMargin: Style.space(88)
-      spacing: Style.space(18)
+      anchors.bottomMargin: Style.space(72)
+      spacing: Style.space(22)
       z: 25
 
       Repeater {
@@ -501,8 +508,8 @@ Item {
           readonly property bool on: modelData && modelData.selected === true
           readonly property color tone: Gate.decisionColor(modelData && modelData.id)
 
-          width: Math.min(Style.space(180), panel.width * 0.2)
-          height: Style.space(148)
+          width: Math.min(Style.space(228), panel.width * 0.24)
+          height: Style.space(196)
           radius: Style.space(18)
           color: Util.alpha(root.background, on ? 0.78 : 0.5)
           border.width: on ? 2 : 1

@@ -170,8 +170,23 @@ assert.ok(String(spec.argv[2]).indexOf(">>") !== -1);
 assert.ok(String(spec.argv[2]).indexOf("$2") !== -1, "JSON body is not interpolated into the shell script");
 
 const pendingSpec = Gate.writeSpec("pending", "/home/ada", "{\"pending\":0}");
-assert.ok(pendingSpec.argv[2].indexOf(">") !== -1);
-assert.ok(pendingSpec.argv[2].indexOf(">>") === -1);
+assert.ok(String(pendingSpec.argv[2]).indexOf(">") !== -1);
+assert.ok(String(pendingSpec.argv[2]).indexOf(">>") === -1);
+
+const os = require("os");
+const { spawnSync } = require("child_process");
+const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "aegis-gate-"));
+const writeLine = Gate.receiptLine({ choice: "GO", live: true, title: "tmp" });
+const write = Gate.writeSpec("receipts", tmpHome, writeLine);
+const ran = spawnSync(write.argv[0], write.argv.slice(1), { encoding: "utf8" });
+assert.strictEqual(ran.status, 0, ran.stderr || "receipt write failed");
+assert.ok(fs.existsSync(write.file));
+assert.ok(fs.readFileSync(write.file, "utf8").indexOf("\"choice\":\"GO\"") !== -1);
+const pendingBody = Gate.receiptLine({ pending: 0 });
+const pendingWrite = Gate.writeSpec("pending", tmpHome, pendingBody);
+const ranPending = spawnSync(pendingWrite.argv[0], pendingWrite.argv.slice(1), { encoding: "utf8" });
+assert.strictEqual(ranPending.status, 0, ranPending.stderr || "pending write failed");
+assert.strictEqual(Gate.parsePendingFile(fs.readFileSync(pendingWrite.file, "utf8")), 0);
 
 assert.strictEqual(Gate.parsePendingFile('{"pending":1}'), 1);
 assert.strictEqual(Gate.parsePendingFile('{"pending":0}'), 0);
