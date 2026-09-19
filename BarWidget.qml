@@ -49,7 +49,7 @@ BarWidget {
     keepSpace: true
     tooltipText: root.pendingCount > 0
       ? ("Aegis Gate — PENDING " + root.pendingCount + " live payload")
-      : "Aegis Gate — summon the approval HUD"
+      : "Aegis Gate — summon the HUD (not an agent interlock)"
     fixedWidth: vertical ? barSize : Style.space(44)
     fixedHeight: vertical ? Style.space(44) : barSize
     onPressed: function(buttonCode) {

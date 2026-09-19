@@ -17,9 +17,10 @@ Item {
   property bool confirming: false
   property real confirmPulse: 0
   property real irisPhase: 0
-  property string selectedAction: "HOLD"
+  property string selectedAction: ""
   property string receiptStatus: ""
   property string lastReceiptPath: ""
+  property bool pendingClearOnSuccess: false
   property var gateState: Gate.emptyState()
   property var gate: Gate.emptyGate()
   property var risks: []
@@ -108,7 +109,7 @@ Item {
 
   function confirmSelected() {
     if (root.confirming) return
-    if (!Gate.normalizeDecision(root.selectedAction)) {
+    if (!Gate.canConfirm(root.selectedAction)) {
       root.receiptStatus = "select GO, HOLD, or NO first"
       return
     }
@@ -118,20 +119,24 @@ Item {
 
   function finishConfirm() {
     var result = Gate.confirm(root.gateState, root.selectedAction, new Date())
-    root.gateState = result.state
-    root.applyShowing()
     if (result.error) {
       root.receiptStatus = result.error
       root.confirming = false
+      root.pendingClearOnSuccess = false
       return
     }
     var line = Gate.receiptLine(result.receipt)
     var spec = Gate.writeSpec("receipts", root.homeDir, line)
+    if (!Gate.writeReady(spec)) {
+      root.receiptStatus = Gate.receiptFailureMessage()
+      root.confirming = false
+      root.pendingClearOnSuccess = false
+      return
+    }
+    root.pendingClearOnSuccess = result.clearPending === true
     root.lastReceiptPath = spec.file
     root.receiptStatus = "writing " + spec.file
     root.runWriter(receiptWriter, spec)
-    root.persistPending()
-    closeFallback.restart()
   }
 
   function cssColor(c, a) {
@@ -217,13 +222,18 @@ Item {
     id: receiptWriter
     running: false
     onExited: {
-      if (root.confirming) {
-        if (receiptWriter.exitCode === 0) {
-          root.receiptStatus = "receipt · " + root.lastReceiptPath
-        } else {
-          root.receiptStatus = "receipts not writable · ~/.local/share/smf-aegis-gate"
-        }
+      if (!root.confirming) return
+      if (receiptWriter.exitCode === 0) {
+        if (root.pendingClearOnSuccess)
+          root.gateState = Gate.clearPending(root.gateState)
+        root.applyShowing()
+        root.persistPending()
+        root.receiptStatus = Gate.receiptStatusForWrite(true, root.lastReceiptPath)
         closeAfterWrite.restart()
+      } else {
+        root.receiptStatus = Gate.receiptFailureMessage()
+        root.confirming = false
+        root.pendingClearOnSuccess = false
       }
     }
   }
@@ -260,13 +270,6 @@ Item {
     interval: 220
     repeat: false
     onTriggered: root.dismiss()
-  }
-
-  Timer {
-    id: closeFallback
-    interval: 900
-    repeat: false
-    onTriggered: if (root.confirming) root.dismiss()
   }
 
   Timer {
@@ -480,8 +483,19 @@ Item {
 
         Text {
           width: parent.width
+          text: Gate.sourceLabel(root.gate && root.gate.source, root.live)
+          color: root.live ? root.holdColor : root.accent
+          opacity: 0.72
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          font.letterSpacing: 1.1
+          horizontalAlignment: Text.AlignHCenter
+        }
+
+        Text {
+          width: parent.width
           text: root.recommendedText
-          color: root.selectedColor
+          color: root.selectedAction ? root.selectedColor : Gate.decisionColor("")
           opacity: 0.8
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
@@ -586,7 +600,7 @@ Item {
       z: 30
       text: root.receiptStatus || "ESC close · 1/G GO · 2/H HOLD · 3/N NO · ENTER confirm"
       color: root.foreground
-      opacity: 0.5
+      opacity: root.receiptStatus ? 0.92 : 0.5
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
       font.letterSpacing: 1.1
