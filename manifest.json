@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "smf.aegis-gate",
+  "name": "Aegis Gate",
+  "version": "0.1.0",
+  "author": "SMF Works",
+  "license": "MIT",
+  "description": "Fullscreen sci-fi GO / HOLD / NO approval HUD for agent, tool, and deploy gates. A starship airlock shield overlay.",
+  "kinds": ["overlay", "bar-widget"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Overlay.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Aegis Gate",
+    "description": "Summons the approval HUD. PENDING only for a live held payload.",
+    "category": "Agents",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

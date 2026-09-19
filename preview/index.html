@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aegis Gate — HUD preview</title>
+  <style>
+    :root {
+      --fg: #e8eefc;
+      --accent: #7dd3fc;
+      --go: #3DDC97;
+      --hold: #F5A524;
+      --no: #FF4D6D;
+      --muted: #8B93A7;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: #04070d; color: var(--fg); font-family: ui-sans-serif, "Segoe UI", sans-serif; }
+    body { display: grid; grid-template-rows: auto 1fr; }
+    body.hud { grid-template-rows: 1fr; }
+    body.hud .toolbar { display: none; }
+    .toolbar {
+      display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+      padding: 12px 16px; background: #0b1220; border-bottom: 1px solid #1c2740;
+      font-size: 13px; z-index: 4;
+    }
+    button, .chip {
+      border: 1px solid #2a3a58; background: #121a2c; color: var(--fg);
+      border-radius: 999px; padding: 6px 12px; cursor: pointer;
+    }
+    button.active { border-color: var(--accent); color: var(--accent); }
+    .stage {
+      position: relative; overflow: hidden;
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: space-between;
+      padding: 22px 16px 18px;
+      background: radial-gradient(ellipse at 50% 38%, #12203a 0%, #070b14 58%, #04070d 100%);
+    }
+    canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .honesty {
+      position: relative;
+      display: flex; gap: 10px; align-items: center;
+      background: rgba(12, 18, 32, 0.86); border: 1px solid rgba(125, 211, 252, 0.55);
+      border-radius: 999px; padding: 8px 16px; font-size: 13px;
+      white-space: nowrap; z-index: 3;
+    }
+    .honesty .mode {
+      border-radius: 999px; padding: 2px 10px; font-weight: 700; letter-spacing: 0.12em;
+      border: 1px solid;
+    }
+    .core {
+      position: relative;
+      width: min(620px, 58vw); background: rgba(10, 16, 30, 0.86);
+      border: 1px solid rgba(245, 165, 36, 0.5); border-radius: 28px;
+      padding: 28px 32px; text-align: center; z-index: 2;
+    }
+    .brand { color: var(--accent); letter-spacing: 0.22em; font-size: 12px; font-weight: 700; }
+    h1 { margin: 12px 0 10px; font-size: clamp(26px, 4vw, 40px); letter-spacing: 0; }
+    .reason { opacity: 0.78; margin: 0 0 16px; font-size: 16px; line-height: 1.45; }
+    .risks { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+    .risk {
+      border-radius: 999px; padding: 5px 12px; font-size: 12px;
+      background: rgba(245, 165, 36, 0.12); border: 1px solid rgba(245, 165, 36, 0.45);
+    }
+    .rec { margin-top: 14px; font-size: 12px; letter-spacing: 0.08em; }
+    .footer-stack { position: relative; z-index: 3; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+    .pillars {
+      display: flex; gap: 22px;
+    }
+    .pillar {
+      width: min(220px, 24vw); height: 168px; border-radius: 18px;
+      background: rgba(12, 18, 32, 0.62); border: 1px solid rgba(255,255,255,0.12);
+      text-align: center; padding-top: 22px; cursor: pointer;
+    }
+    .pillar.on { transform: scale(1.05); background: rgba(12, 18, 32, 0.88); }
+    .pillar.pulse { transform: scale(1.1); box-shadow: 0 0 40px currentColor; }
+    .pillar .cap { height: 7px; margin: -22px -1px 22px; border-radius: 3px 3px 0 0; }
+    .pillar h2 { margin: 0; letter-spacing: 0.16em; font-size: 38px; }
+    .hint, .key, .footer { opacity: 0.55; font-size: 13px; }
+    .footer { letter-spacing: 0.06em; }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <strong>Aegis Gate preview</strong>
+    <button data-scene="demo">DEMO HOLD</button>
+    <button data-scene="live">LIVE HOLD</button>
+    <button data-scene="go">LIVE GO</button>
+    <button data-scene="no">LIVE NO</button>
+    <button data-scene="partial">no verdict</button>
+    <button id="confirm">Enter confirm</button>
+    <span id="status"></span>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="field"></canvas>
+    <div class="honesty" id="honesty"></div>
+    <div class="core" id="core"></div>
+    <div class="footer-stack">
+      <div class="pillars" id="pillars"></div>
+      <div class="footer" id="footer">ESC close · 1/G GO · 2/H HOLD · 3/N NO · ENTER confirm</div>
+    </div>
+  </div>
+  <script>
+    const scenes = {
+      demo: { live: false, decision: "HOLD", title: "Deploy to staging?", reason: "Sample HOLD for the DEMO airlock. Not a live agent, tool, or deploy gate.", risks: ["unreviewed diff", "weekend window", "no rollback drill"], honesty: "DEMO gate · not a live agent · HUD does not block tools", rec: "DEMO sample HOLD" },
+      live: { live: true, decision: "HOLD", title: "Deploy to prod?", reason: "Migration has no rollback", risks: ["prod write", "no canary"], honesty: "LIVE payload · manual summon · manual HUD, not an agent bridge", rec: "payload HOLD" },
+      go: { live: true, decision: "GO", title: "Lint the README?", reason: "Docs-only local check from a summon payload.", risks: ["docs only"], honesty: "LIVE payload · shell summon · manual HUD, not an agent bridge", rec: "payload GO" },
+      no: { live: true, decision: "NO", title: "Wipe /var/lib?", reason: "Irreversible. The HUD is displaying a summoned NO — it is not blocking a tool.", risks: ["irreversible", "production data"], honesty: "LIVE payload · summoned as hermes · manual HUD, not an agent bridge", rec: "payload NO" },
+      partial: { live: false, decision: "", title: "Ship it", reason: "Title and reason only. No decision field, so no invented verdict.", risks: [], honesty: "DEMO gate · not a live agent · HUD does not block tools", rec: "no verdict in payload" }
+    };
+    const colors = { GO: "#3DDC97", HOLD: "#F5A524", NO: "#FF4D6D" };
+    const params = new URLSearchParams(location.search);
+    if (params.get("hud") === "1") document.body.classList.add("hud");
+    let current = params.get("scene") || "demo";
+    let selected = "HOLD";
+    let pulse = 0;
+
+    function render(name) {
+      current = name;
+      const g = scenes[name] || scenes.demo;
+      selected = g.decision || "HOLD";
+      pulse = 0;
+      document.querySelectorAll(".toolbar button[data-scene]").forEach((b) => b.classList.toggle("active", b.dataset.scene === name));
+      const tone = g.live ? "var(--hold)" : "var(--accent)";
+      document.getElementById("honesty").innerHTML = `<span class="mode" style="color:${tone};border-color:currentColor;background:${g.live ? "rgba(245,165,36,.28)" : "rgba(125,211,252,.16)"}">${g.live ? "LIVE" : "DEMO"}</span><span>${g.honesty}</span>`;
+      document.getElementById("core").style.borderColor = (colors[selected] || "#7dd3fc") + "99";
+      document.getElementById("core").innerHTML = `<div class="brand">AEGIS GATE</div><h1>${g.title}</h1><p class="reason">${g.reason}</p><div class="risks">${g.risks.map((r) => `<span class="risk">${r}</span>`).join("")}</div><div class="rec" style="color:${colors[selected] || "var(--muted)"}">${g.rec}</div>`;
+      document.getElementById("pillars").innerHTML = ["GO","HOLD","NO"].map((id) => {
+        const on = id === selected;
+        return `<div class="pillar ${on ? "on" : ""}" data-id="${id}" style="color:${colors[id]};border-color:${on ? colors[id] : "rgba(255,255,255,.12)"}"><div class="cap" style="background:${colors[id]}"></div><h2>${id}</h2><div class="hint">${id === "GO" ? "proceed" : id === "HOLD" ? "review" : "refuse"}</div><div class="key">${id === "GO" ? "1 / G" : id === "HOLD" ? "2 / H" : "3 / N"}</div></div>`;
+      }).join("");
+      document.getElementById("status").textContent = g.live ? "PENDING 1 (live)" : "PENDING 0 (demo)";
+      document.getElementById("footer").textContent = "ESC close · 1/G GO · 2/H HOLD · 3/N NO · ENTER confirm";
+      paint();
+    }
+
+    function paint() {
+      const canvas = document.getElementById("field");
+      const rect = canvas.parentElement.getBoundingClientRect();
+      canvas.width = rect.width * devicePixelRatio;
+      canvas.height = rect.height * devicePixelRatio;
+      const ctx = canvas.getContext("2d");
+      const w = canvas.width, h = canvas.height, cx = w * 0.5, cy = h * 0.38, maxR = Math.min(w, h) * 0.36;
+      ctx.clearRect(0, 0, w, h);
+      ctx.strokeStyle = "rgba(125,211,252,0.08)";
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 14; i++) {
+        ctx.beginPath();
+        ctx.moveTo(0, h * 0.06 + i * 52);
+        ctx.lineTo(w, h * 0.0 + i * 52);
+        ctx.stroke();
+      }
+      function hex(r, a, width) {
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const ang = Math.PI / 6 + i * Math.PI / 3;
+          const x = cx + r * Math.cos(ang), y = cy + r * Math.sin(ang);
+          i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+        }
+        ctx.closePath();
+        ctx.lineWidth = width;
+        ctx.strokeStyle = `rgba(125,211,252,${a})`;
+        ctx.stroke();
+      }
+      hex(maxR * 1.16, 0.22, 2);
+      hex(maxR * 0.9, 0.5, 3.2);
+      hex(maxR * 0.64, 0.2, 1.6);
+      const arcs = [
+        { id: "GO", c: colors.GO, s: -Math.PI * 0.5 },
+        { id: "HOLD", c: colors.HOLD, s: Math.PI * 0.1667 },
+        { id: "NO", c: colors.NO, s: Math.PI * 0.8333 }
+      ];
+      arcs.forEach((arc) => {
+        const on = arc.id === selected;
+        ctx.beginPath();
+        ctx.lineWidth = on ? 11 + pulse * 7 : 5;
+        ctx.strokeStyle = arc.c;
+        ctx.globalAlpha = on ? 0.95 : 0.5;
+        ctx.arc(cx, cy, maxR * 0.98, arc.s + 0.07, arc.s + Math.PI * 0.666 - 0.07);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      });
+    }
+
+    document.querySelectorAll("[data-scene]").forEach((b) => b.addEventListener("click", () => render(b.dataset.scene)));
+    document.getElementById("confirm").addEventListener("click", () => {
+      pulse = 1;
+      document.querySelectorAll(".pillar").forEach((p) => p.classList.toggle("pulse", p.dataset.id === selected));
+      document.getElementById("status").textContent = "receipt · ~/.local/share/smf-aegis-gate/receipts.jsonl";
+      document.getElementById("footer").textContent = "receipt · ~/.local/share/smf-aegis-gate/receipts.jsonl";
+      paint();
+    });
+    window.addEventListener("resize", paint);
+    render(current);
+  </script>
+</body>
+</html>
