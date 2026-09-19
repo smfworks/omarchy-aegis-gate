@@ -78,6 +78,7 @@ samples.forEach(function(sample) {
   assert.strictEqual(gate.live, false);
   assert.strictEqual(gate.mode, "demo");
   assert.strictEqual(Gate.modeLabel(gate.mode), "DEMO");
+  assert.ok(gate.title.indexOf("DEMO") === 0, "DEMO titles stay labeled when cropped");
   assert.ok(Gate.honestyLine(gate).indexOf("DEMO") !== -1);
   assert.ok(Gate.neverClaimsAgentBridge(Gate.honestyLine(gate)));
 });
@@ -87,17 +88,28 @@ assert.strictEqual(Gate.pendingCount(state), 0);
 
 state = Gate.resolveOpen("{}", state);
 assert.strictEqual(state.showing.mode, "demo");
-assert.strictEqual(state.showing.decision, "HOLD");
-assert.strictEqual(state.showing.source, "demo");
+assert.strictEqual(state.showing.decision, "", "empty payload never invents HOLD");
+assert.strictEqual(state.showing.live, false);
+assert.ok(state.showing.title.indexOf("DEMO") !== -1);
 assert.strictEqual(Gate.pendingCount(state), 0, "DEMO does not inflate PENDING");
-assert.ok(state.showing.reason.indexOf("DEMO") !== -1 || state.showing.reason.indexOf("demo") !== -1 || state.showing.reason.indexOf("Sample") !== -1);
+assert.strictEqual(Gate.defaultFocus(state.showing), "", "no default pillar without a verdict");
+assert.strictEqual(Gate.recommendedLine(state.showing), "no verdict in payload");
+assert.ok(state.showing.reason.indexOf("does not block") !== -1);
 
 state = Gate.resolveOpen("{}", state);
-assert.strictEqual(state.showing.decision, "NO", "empty summons cycle DEMO samples");
-state = Gate.resolveOpen("{}", state);
-assert.strictEqual(state.showing.decision, "GO");
-state = Gate.resolveOpen("{}", state);
-assert.strictEqual(state.showing.decision, "HOLD");
+assert.strictEqual(state.showing.decision, "", "empty summons stay empty, they do not cycle HOLD");
+
+let demoTour = Gate.resolveOpen('{"demo":true}', Gate.emptyState());
+assert.strictEqual(demoTour.showing.decision, "HOLD");
+assert.strictEqual(demoTour.showing.live, false);
+assert.ok(demoTour.showing.title.indexOf("DEMO") === 0);
+assert.strictEqual(Gate.pendingCount(demoTour), 0);
+demoTour = Gate.resolveOpen('{"demo":true}', demoTour);
+assert.strictEqual(demoTour.showing.decision, "NO", "explicit demo:true cycles DEMO samples");
+demoTour = Gate.resolveOpen('{"demo":true}', demoTour);
+assert.strictEqual(demoTour.showing.decision, "GO");
+demoTour = Gate.resolveOpen('{"demo":true}', demoTour);
+assert.strictEqual(demoTour.showing.decision, "HOLD");
 
 const liveJson = '{"decision":"HOLD","title":"Deploy to prod?","reason":"no rollback","risks":["prod write"],"source":"manual"}';
 state = Gate.resolveOpen(liveJson, state);
@@ -122,10 +134,13 @@ assert.strictEqual(partial.live, false);
 const partialOpen = Gate.resolveOpen('{"title":"Ship it","reason":"looks fine"}', Gate.emptyState());
 assert.strictEqual(partialOpen.showing.live, false);
 assert.strictEqual(partialOpen.showing.decision, "", "do not invent HOLD for a title-only payload");
-assert.strictEqual(partialOpen.showing.title, "Ship it");
+assert.ok(partialOpen.showing.title.indexOf("Ship it") !== -1);
+assert.ok(partialOpen.showing.title.indexOf("DEMO") === 0);
 assert.strictEqual(Gate.recommendedLine(partialOpen.showing), "no verdict in payload");
 assert.strictEqual(Gate.pendingCount(partialOpen), 0);
-assert.strictEqual(Gate.defaultFocus(partialOpen.showing), "HOLD");
+assert.strictEqual(Gate.defaultFocus(partialOpen.showing), "", "do not invent HOLD focus");
+assert.strictEqual(Gate.canConfirm(""), false);
+assert.strictEqual(Gate.canConfirm("HOLD"), true);
 
 const confirmed = Gate.confirm(state, "NO", now);
 assert.strictEqual(confirmed.error, "");
@@ -134,11 +149,15 @@ assert.strictEqual(confirmed.receipt.recommended, "HOLD");
 assert.strictEqual(confirmed.receipt.live, true);
 assert.strictEqual(confirmed.receipt.mode, "live");
 assert.strictEqual(confirmed.receipt.ts, now);
-assert.strictEqual(Gate.pendingCount(confirmed.state), 0, "confirm clears LIVE pending");
+assert.strictEqual(confirmed.clearPending, true);
+assert.strictEqual(Gate.pendingCount(confirmed.state), 1, "confirm keeps LIVE pending until the receipt write succeeds");
+assert.strictEqual(Gate.pendingCount(Gate.clearPending(confirmed.state)), 0, "clearPending after a successful write");
 
 const noChoice = Gate.confirm(state, "", now);
 assert.strictEqual(noChoice.error, "no action selected");
 assert.strictEqual(noChoice.receipt, null);
+assert.strictEqual(noChoice.clearPending, false);
+assert.strictEqual(Gate.pendingCount(noChoice.state), 1, "refused confirm does not drop LIVE pending");
 
 assert.strictEqual(Gate.focusFromKey("g"), "GO");
 assert.strictEqual(Gate.focusFromKey("1"), "GO");
@@ -158,6 +177,8 @@ const pillars = Gate.pillarModel("HOLD");
 assert.strictEqual(pillars.length, 3);
 assert.strictEqual(pillars[1].selected, true);
 assert.strictEqual(pillars[0].selected, false);
+const none = Gate.pillarModel("");
+assert.ok(none.every(function(p) { return p.selected === false; }), "no pillar preselected without a verdict");
 
 assert.ok(Gate.receiptsPath("/home/ada").indexOf("/.local/share/smf-aegis-gate/receipts.jsonl") !== -1);
 assert.ok(Gate.pendingPath("/home/ada").indexOf("/.local/share/smf-aegis-gate/pending.json") !== -1);
@@ -168,10 +189,16 @@ assert.strictEqual(String(spec.argv[1]), "-c");
 assert.strictEqual(String(spec.argv[4]), "/home/ada/.local/share/smf-aegis-gate");
 assert.ok(String(spec.argv[2]).indexOf(">>") !== -1);
 assert.ok(String(spec.argv[2]).indexOf("$2") !== -1, "JSON body is not interpolated into the shell script");
+assert.strictEqual(Gate.writeReady(spec), true);
+assert.strictEqual(Gate.writeReady(Gate.writeSpec("receipts", "", "{\"choice\":\"GO\"}")), false, "empty HOME is not writable");
+assert.strictEqual(Gate.receiptFailureMessage(), "receipts not writable · ~/.local/share/smf-aegis-gate");
+assert.strictEqual(Gate.receiptStatusForWrite(false, "/tmp/x"), Gate.receiptFailureMessage());
+assert.ok(Gate.receiptStatusForWrite(true, "/tmp/x").indexOf("/tmp/x") !== -1);
 
 const pendingSpec = Gate.writeSpec("pending", "/home/ada", "{\"pending\":0}");
 assert.ok(String(pendingSpec.argv[2]).indexOf(">") !== -1);
 assert.ok(String(pendingSpec.argv[2]).indexOf(">>") === -1);
+assert.strictEqual(Gate.writeReady(pendingSpec), true);
 
 const os = require("os");
 const { spawnSync } = require("child_process");
@@ -208,6 +235,13 @@ assert.ok(overlay.includes("Qt.Key_G"));
 assert.ok(overlay.includes("Qt.Key_H"));
 assert.ok(overlay.includes("Qt.Key_N"));
 assert.ok(overlay.includes("confirmPulse"));
+assert.ok(overlay.includes("property string selectedAction: \"\""));
+assert.ok(overlay.includes("Gate.canConfirm"));
+assert.ok(overlay.includes("select GO, HOLD, or NO first"));
+assert.ok(overlay.includes("receiptFailureMessage"));
+assert.ok(overlay.includes("writeReady"));
+assert.ok(overlay.includes("clearPending"));
+assert.ok(!overlay.includes("closeFallback"));
 assert.ok(!overlay.includes("omarchy.aegis"));
 assert.ok(Gate.neverClaimsAgentBridge(overlay));
 
@@ -225,10 +259,14 @@ assert.strictEqual(manifest.entryPoints.barWidget, "BarWidget.qml");
 assert.strictEqual(manifest.keepLoaded, true);
 assert.strictEqual(manifest.author, "SMF Works");
 assert.strictEqual(manifest.license, "MIT");
+assert.ok(String(manifest.description).indexOf("summon HUD") !== -1);
+assert.ok(String(manifest.description).indexOf("not a Hermes or tool interlock") !== -1);
+assert.ok(Gate.neverClaimsAgentBridge(manifest.description));
 assert.ok(!fs.lstatSync(path.join(__dirname, "..", "Overlay.qml")).isSymbolicLink());
 assert.ok(!fs.lstatSync(path.join(__dirname, "..", "BarWidget.qml")).isSymbolicLink());
 assert.ok(!fs.lstatSync(path.join(__dirname, "..", "GateLogic.js")).isSymbolicLink());
 assert.ok(!fs.lstatSync(path.join(__dirname, "..", "manifest.json")).isSymbolicLink());
+assert.ok(!fs.lstatSync(path.join(__dirname, "..", "docs", "OPPOSITION.md")).isSymbolicLink());
 
 const readme = fs.readFileSync(path.join(__dirname, "..", "README.md"), "utf8");
 assert.ok(readme.includes("omarchy plugin add https://github.com/smfworks/omarchy-aegis-gate.git --enable"));
@@ -240,8 +278,24 @@ assert.ok(readme.includes("~/.local/share/smf-aegis-gate/receipts.jsonl"));
 assert.ok(readme.includes("refuse-card"));
 assert.ok(readme.includes("omarchy-orbit-dock"));
 assert.ok(readme.includes("omarchy-ghost-trace"));
-assert.ok(readme.includes("manual / summon HUD") || readme.includes("manual / summon"));
+assert.ok(readme.includes("summon HUD, not a hard agent interlock") || readme.includes("not a hard agent interlock"));
+assert.ok(readme.includes("docs/OPPOSITION.md"));
+assert.ok(readme.includes("{\"demo\":true}") || readme.includes("demo\":true"));
 assert.ok(readme.includes("Escape") || readme.includes("`Escape`"));
 assert.ok(Gate.neverClaimsAgentBridge(readme));
+
+const preview = fs.readFileSync(path.join(__dirname, "..", "preview", "index.html"), "utf8");
+assert.ok(preview.includes("DEMO airlock"));
+assert.ok(preview.includes("no verdict in payload"));
+assert.ok(preview.includes("select GO, HOLD, or NO first"));
+assert.ok(Gate.neverClaimsAgentBridge(preview));
+
+const opposition = fs.readFileSync(path.join(__dirname, "..", "docs", "OPPOSITION.md"), "utf8");
+assert.ok(opposition.includes("do not trust Aegis Gate as an agent gate yet"));
+assert.ok(opposition.includes("DEMO looking like a LIVE"));
+assert.ok(opposition.includes("invents HOLD") || opposition.includes("invent HOLD"));
+assert.ok(opposition.includes("receipts fail silently") || opposition.includes("Receipts fail"));
+assert.ok(opposition.includes("Keyboard confirm"));
+assert.ok(opposition.includes("Hermes") && opposition.includes("hook"));
 
 console.log("ok - GateLogic helpers");

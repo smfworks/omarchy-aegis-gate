@@ -1,8 +1,11 @@
 .pragma library
 
-// Aegis Gate helpers. LIVE requires a valid GO/HOLD/NO in the summon
-// payload. Missing or invalid decision never invents a verdict. DEMO
-// samples are labeled DEMO and never inflate the PENDING chip.
+// Aegis Gate helpers. This is a summon HUD, not an agent interlock.
+// LIVE requires a valid GO/HOLD/NO in the summon payload. Missing or
+// invalid decision never invents a verdict — empty "{}" is a DEMO
+// airlock, not HOLD. DEMO samples are labeled DEMO, only play on an
+// explicit demo summon, and never inflate the PENDING chip. Receipt
+// pending stays until the JSONL append succeeds.
 
 var DECISIONS = ["GO", "HOLD", "NO"]
 var PLUGIN_ID = "smf.aegis-gate"
@@ -65,7 +68,7 @@ function emptyGate() {
     title: "",
     reason: "",
     risks: [],
-    source: "demo",
+    source: "",
     mode: "demo",
     live: false
   }
@@ -152,16 +155,22 @@ function decorateGate(base, mode) {
   var decision = normalizeDecision(g.decision)
   var title = trimStr(g.title)
   var reason = trimStr(g.reason)
+  var source = normalizeSource(g.source)
   if (!title)
     title = live ? "Untitled gate" : "DEMO airlock"
-  if (!reason && !live)
-    reason = "No summon payload. Showing a labeled DEMO sample — not a live agent."
+  if (!live && title && !/^DEMO\b/i.test(title))
+    title = "DEMO · " + title
+  if (!reason && !live) {
+    reason = decision
+      ? "Labeled DEMO sample — not a live agent, tool, or deploy gate."
+      : "No summon payload and no verdict. This HUD does not block Hermes, tools, or deploys."
+  }
   return {
     decision: decision,
     title: title,
     reason: reason,
     risks: cloneRisks(g.risks),
-    source: live ? (normalizeSource(g.source) || "summon") : "demo",
+    source: live ? (source || "summon") : source,
     mode: live ? "live" : "demo",
     live: live
   }
@@ -185,18 +194,22 @@ function resolveOpen(payloadJson, state) {
     next.showing = cloneGate(next.pending)
     return next
   }
-  if (hasGateContent(parsed) && !parsed.decision) {
+  if (hasGateContent(parsed) || parsed.decision) {
     next.showing = decorateGate(parsed, "demo")
     return next
   }
-  if (parsed.forceDemo || !next.pending) {
+  if (parsed.forceDemo) {
     var samples = demoSamples()
     var idx = ((next.demoIndex % samples.length) + samples.length) % samples.length
     next.showing = decorateGate(samples[idx], "demo")
     next.demoIndex = idx + 1
     return next
   }
-  next.showing = cloneGate(next.pending)
+  if (next.pending) {
+    next.showing = cloneGate(next.pending)
+    return next
+  }
+  next.showing = decorateGate(emptyGate(), "demo")
   return next
 }
 
@@ -223,7 +236,8 @@ function confirm(state, choice, now) {
     return {
       state: state || emptyState(),
       receipt: null,
-      error: "no action selected"
+      error: "no action selected",
+      clearPending: false
     }
   }
   var gate = (state && state.showing) ? cloneGate(state.showing) : emptyGate()
@@ -243,8 +257,24 @@ function confirm(state, choice, now) {
     demoIndex: state ? Math.round(number(state.demoIndex)) || 0 : 0,
     showing: gate
   }
-  if (gate.live) next.pending = null
-  return { state: next, receipt: receipt, error: "" }
+  return {
+    state: next,
+    receipt: receipt,
+    error: "",
+    clearPending: gate.live === true
+  }
+}
+
+function clearPending(state) {
+  return {
+    pending: null,
+    demoIndex: state ? Math.round(number(state.demoIndex)) || 0 : 0,
+    showing: state && state.showing ? cloneGate(state.showing) : null
+  }
+}
+
+function canConfirm(choice) {
+  return normalizeDecision(choice) !== ""
 }
 
 function focusFromKey(text, keyName) {
@@ -280,9 +310,13 @@ function modeLabel(mode) {
 }
 
 function sourceLabel(source, live) {
-  if (!live) return "DEMO sample"
+  if (!live) {
+    var demo = normalizeSource(source)
+    if (demo === "demo") return "DEMO sample"
+    return "DEMO airlock"
+  }
   var s = normalizeSource(source)
-  if (s === "hermes") return "summoned as hermes"
+  if (s === "hermes") return "summoned as hermes — label only, no hook"
   if (s === "manual") return "manual summon"
   if (s === "summon") return "shell summon"
   if (s) return "source " + s
@@ -292,7 +326,7 @@ function sourceLabel(source, live) {
 function honestyLine(gate) {
   if (!gate || !gate.live)
     return "DEMO gate · not a live agent · HUD does not block tools"
-  return "LIVE payload · " + sourceLabel(gate.source, true) + " · manual HUD, not an agent bridge"
+  return "LIVE payload · " + sourceLabel(gate.source, true) + " · summon HUD, not an agent bridge"
 }
 
 function recommendedLine(gate) {
@@ -304,8 +338,7 @@ function recommendedLine(gate) {
 }
 
 function defaultFocus(gate) {
-  var decision = normalizeDecision(gate && gate.decision)
-  return decision || "HOLD"
+  return normalizeDecision(gate && gate.decision)
 }
 
 function shareDir(home) {
@@ -360,6 +393,19 @@ function writeSpec(kind, home, body) {
   }
 }
 
+function writeReady(spec) {
+  return !!(spec && trimStr(spec.dir) && trimStr(spec.file) && spec.argv && spec.argv.length)
+}
+
+function receiptFailureMessage() {
+  return "receipts not writable · ~/.local/share/smf-aegis-gate"
+}
+
+function receiptStatusForWrite(ok, file) {
+  if (ok) return "receipt · " + trimStr(file)
+  return receiptFailureMessage()
+}
+
 function pillarModel(selected) {
   var sel = normalizeDecision(selected)
   return [
@@ -397,5 +443,8 @@ function neverClaimsAgentBridge(text) {
   if (s.indexOf("blocking hermes") !== -1) return false
   if (s.indexOf("blocked the agent") !== -1) return false
   if (s.indexOf("tool call intercepted") !== -1) return false
+  if (s.indexOf("intercepts hermes") !== -1) return false
+  if (s.indexOf("tool calls are blocked") !== -1) return false
+  if (s.indexOf("for agent, tool, and deploy gates") !== -1) return false
   return true
 }

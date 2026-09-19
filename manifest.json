@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "smf.aegis-gate",
   "name": "Aegis Gate",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "SMF Works",
   "license": "MIT",
-  "description": "Fullscreen sci-fi GO / HOLD / NO approval HUD for agent, tool, and deploy gates. A starship airlock shield overlay.",
+  "description": "Fullscreen sci-fi GO / HOLD / NO summon HUD. A starship airlock overlay — not a Hermes or tool interlock.",
   "kinds": ["overlay", "bar-widget"],
   "keepLoaded": true,
   "entryPoints": {
