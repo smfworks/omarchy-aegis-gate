@@ -1,0 +1,3 @@
+# omarchy-aegis-gate
+
+Scaffolding Aegis Gate for Omarchy Quattro…
