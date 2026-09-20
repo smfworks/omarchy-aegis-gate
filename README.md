@@ -21,6 +21,12 @@ Sibling plugins:
 [Orbit Dock](https://github.com/smfworks/omarchy-orbit-dock),
 [Ghost Trace](https://github.com/smfworks/omarchy-ghost-trace).
 
+## Demo
+
+Aegis Gate on Omarchy (mikesai6) — GO / HOLD / NO summon HUD (DEMO samples + labeled HOLD/NO/GO).
+
+https://github.com/smfworks/omarchy-aegis-gate/releases/download/demo/demo.mp4
+
 ## Install
 
 ```sh
